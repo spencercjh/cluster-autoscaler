@@ -18,7 +18,10 @@ package predicate
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -27,8 +30,11 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	apiv1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/client-go/informers"
 	clientsetfake "k8s.io/client-go/kubernetes/fake"
+	extenderv1 "k8s.io/kube-scheduler/extender/v1"
+	kubescheduler "k8s.io/kubernetes/pkg/scheduler"
 	"k8s.io/kubernetes/pkg/scheduler/apis/config"
 	scheduler_config_latest "k8s.io/kubernetes/pkg/scheduler/apis/config/latest"
 
@@ -290,6 +296,94 @@ func TestRunFilterUntilPassingNode(t *testing.T) {
 				assert.Contains(t, tc.expectedNodes, node.Name)
 			}
 		})
+	}
+}
+
+func TestRunFiltersUntilPassingNodePassesTemplateNodesToExtender(t *testing.T) {
+	const (
+		gpuResource          = apiv1.ResourceName("nvidia.com/gpu")
+		deviceInfoAnnotation = "hami.io/node-nvidia-register"
+	)
+
+	filterRequests := make(chan extenderv1.ExtenderArgs, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/filter" {
+			http.NotFound(w, r)
+			return
+		}
+
+		defer r.Body.Close()
+		var args extenderv1.ExtenderArgs
+		if err := json.NewDecoder(r.Body).Decode(&args); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if args.Nodes == nil || len(args.Nodes.Items) != 2 {
+			http.Error(w, "expected two template nodes", http.StatusBadRequest)
+			return
+		}
+		var selectedNode *apiv1.Node
+		for i := range args.Nodes.Items {
+			if args.Nodes.Items[i].Name == "hami-selected" {
+				selectedNode = args.Nodes.Items[i].DeepCopy()
+				break
+			}
+		}
+		if selectedNode == nil {
+			http.Error(w, "expected hami-selected template node", http.StatusBadRequest)
+			return
+		}
+
+		filterRequests <- args
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(extenderv1.ExtenderFilterResult{
+			Nodes: &apiv1.NodeList{Items: []apiv1.Node{*selectedNode}},
+		}); err != nil {
+			t.Errorf("write filter response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	extender, err := kubescheduler.NewHTTPExtender(&config.Extender{
+		URLPrefix:        server.URL,
+		FilterVerb:       "filter",
+		NodeCacheCapable: false,
+		ManagedResources: []config.ExtenderManagedResource{{Name: string(gpuResource), IgnoredByScheduler: true}},
+	})
+	assert.NoError(t, err)
+
+	pluginRunner, snapshot, err := newTestPluginRunnerAndSnapshot(nil)
+	assert.NoError(t, err)
+	pluginRunner.extenders = append(pluginRunner.extenders, extender)
+
+	nodeFilteredOut := BuildTestNode("hami-filtered-out", 1000, 2000000)
+	nodeSelected := BuildTestNode("hami-selected", 1000, 2000000)
+	for _, node := range []*apiv1.Node{nodeFilteredOut, nodeSelected} {
+		node.Annotations = map[string]string{deviceInfoAnnotation: `[{"id":"GPU-MOCK-0"}]`}
+		node.Status.Capacity[gpuResource] = *resource.NewQuantity(4, resource.DecimalSI)
+		node.Status.Allocatable[gpuResource] = *resource.NewQuantity(4, resource.DecimalSI)
+		assert.NoError(t, snapshot.AddNodeInfo(framework.NewTestNodeInfo(node)))
+	}
+
+	pod := BuildTestPod("gpu-workload", 100, 1000)
+	pod.Spec.Containers[0].Resources.Requests[gpuResource] = *resource.NewQuantity(1, resource.DecimalSI)
+
+	node, _, schedulingErr := pluginRunner.RunFiltersUntilPassingNode(pod, clustersnapshot.SchedulingOptions{
+		IsNodeAcceptable: func(info *framework.NodeInfo) bool { return true },
+	})
+	assert.NoError(t, schedulingErr)
+	assert.Equal(t, nodeSelected.Name, node.Name)
+
+	var args extenderv1.ExtenderArgs
+	select {
+	case args = <-filterRequests:
+	case <-time.After(time.Second):
+		t.Fatal("extender filter was not called")
+	}
+	assert.Nil(t, args.NodeNames)
+	assert.Len(t, args.Nodes.Items, 2)
+	for _, sentNode := range args.Nodes.Items {
+		assert.Equal(t, `[{"id":"GPU-MOCK-0"}]`, sentNode.Annotations[deviceInfoAnnotation])
 	}
 }
 
