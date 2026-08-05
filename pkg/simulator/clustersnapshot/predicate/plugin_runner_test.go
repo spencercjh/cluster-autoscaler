@@ -387,6 +387,69 @@ func TestRunFiltersUntilPassingNodePassesTemplateNodesToExtender(t *testing.T) {
 	}
 }
 
+func TestRunFiltersOnNodeInvokesExtenderForIgnoredManagedResource(t *testing.T) {
+	const gpuCoresResource = apiv1.ResourceName("nvidia.com/gpucores")
+
+	filterRequests := make(chan extenderv1.ExtenderArgs, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/filter" {
+			http.NotFound(w, r)
+			return
+		}
+
+		defer r.Body.Close()
+		var args extenderv1.ExtenderArgs
+		if err := json.NewDecoder(r.Body).Decode(&args); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		filterRequests <- args
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(extenderv1.ExtenderFilterResult{Nodes: args.Nodes}); err != nil {
+			t.Errorf("write filter response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	schedConfig, err := scheduler_config_latest.Default()
+	assert.NoError(t, err)
+	schedConfig.Extenders = []config.Extender{{
+		URLPrefix:        server.URL,
+		FilterVerb:       "filter",
+		NodeCacheCapable: false,
+		ManagedResources: []config.ExtenderManagedResource{{Name: string(gpuCoresResource), IgnoredByScheduler: true}},
+	}}
+
+	fwHandle, err := framework.NewHandle(context.Background(), informers.NewSharedInformerFactory(clientsetfake.NewSimpleClientset(), 0), schedConfig, true, false)
+	assert.NoError(t, err)
+	snapshot := NewPredicateSnapshot(store.NewBasicSnapshotStore(), fwHandle, true, 1, false, 0)
+	pluginRunner := NewSchedulerPluginRunner(fwHandle, snapshot, 1, 0, fwHandle.Extenders)
+
+	node := BuildTestNode("hami-template", 1000, 2000000)
+	assert.NotContains(t, node.Status.Capacity, gpuCoresResource)
+	assert.NotContains(t, node.Status.Allocatable, gpuCoresResource)
+	assert.NoError(t, snapshot.AddNodeInfo(framework.NewTestNodeInfo(node)))
+
+	pod := BuildTestPod("gpu-workload", 100, 1000)
+	pod.Spec.Containers[0].Resources.Requests[gpuCoresResource] = *resource.NewQuantity(1, resource.DecimalSI)
+
+	selectedNode, _, schedulingErr := pluginRunner.RunFiltersOnNode(pod, node.Name)
+	assert.NoError(t, schedulingErr)
+	if !assert.NotNil(t, selectedNode) {
+		return
+	}
+	assert.Equal(t, node.Name, selectedNode.Name)
+
+	select {
+	case args := <-filterRequests:
+		assert.NotNil(t, args.Nodes)
+		assert.Len(t, args.Nodes.Items, 1)
+		assert.Equal(t, node.Name, args.Nodes.Items[0].Name)
+	case <-time.After(time.Second):
+		t.Fatal("extender filter was not called")
+	}
+}
+
 func TestRunFilterUntilPassingNode_NodeOrdering(t *testing.T) {
 	p100 := BuildTestPod("p100", 100, 1000)
 
