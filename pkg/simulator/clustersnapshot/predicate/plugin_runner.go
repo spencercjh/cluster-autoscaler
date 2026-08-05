@@ -96,6 +96,10 @@ func (p *SchedulerPluginRunner) RunFiltersUntilPassingNode(pod *apiv1.Pod, opts 
 
 	nodeOrdering.Reset(nodeInfosList)
 
+	shouldRunExtenders := p.hasInterestedFilterExtender(pod)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	var (
 		mu           sync.Mutex
 		passingNodes []nodeFilterResult
@@ -104,6 +108,7 @@ func (p *SchedulerPluginRunner) RunFiltersUntilPassingNode(pod *apiv1.Pod, opts 
 	checkNode := func(i int) {
 		nodeIndex := nodeOrdering.At(i)
 		if nodeIndex < 0 {
+			cancel()
 			return
 		}
 
@@ -134,18 +139,21 @@ func (p *SchedulerPluginRunner) RunFiltersUntilPassingNode(pod *apiv1.Pod, opts 
 			// Filter passed for all plugins, so this pod can be scheduled on this Node.
 			mu.Lock()
 			passingNodes = append(passingNodes, nodeFilterResult{orderIndex: i, nodeIndex: nodeIndex, nodeInfo: nodeInfo})
+			if !shouldRunExtenders {
+				cancel()
+			}
 			mu.Unlock()
 		}
 		// Filter didn't pass for some plugin, so this Node won't work - move on to the next one.
 	}
 
-	workqueue.ParallelizeUntil(context.Background(), p.parallelism, len(nodeInfosList), checkNode, workqueue.WithChunkSize(chunkSizeFor(len(nodeInfosList), p.parallelism)))
+	workqueue.ParallelizeUntil(ctx, p.parallelism, len(nodeInfosList), checkNode, workqueue.WithChunkSize(chunkSizeFor(len(nodeInfosList), p.parallelism)))
 
 	if len(passingNodes) == 0 {
 		return nil, nil, clustersnapshot.NewNoNodesPassingPredicatesFoundError(pod)
 	}
 
-	if len(p.extenders) > 0 {
+	if shouldRunExtenders {
 		extenderFiltered, err := p.runExtenderFilters(pod, passingNodes)
 		if err != nil {
 			return nil, nil, err
@@ -165,6 +173,15 @@ func (p *SchedulerPluginRunner) RunFiltersUntilPassingNode(pod *apiv1.Pod, opts 
 
 	nodeOrdering.MarkMatch(earliest.nodeIndex)
 	return earliest.nodeInfo.Node(), state, nil
+}
+
+func (p *SchedulerPluginRunner) hasInterestedFilterExtender(pod *apiv1.Pod) bool {
+	for _, extender := range p.extenders {
+		if extender.IsFilter() && extender.IsInterested(pod) {
+			return true
+		}
+	}
+	return false
 }
 
 // RunFiltersOnNode runs the scheduler framework PreFilter and Filter phases to check if the given pod can be scheduled on the given node.
