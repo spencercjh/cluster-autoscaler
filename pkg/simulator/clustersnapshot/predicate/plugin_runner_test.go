@@ -421,6 +421,42 @@ func TestRunFilterUntilPassingNode_NodeOrdering(t *testing.T) {
 	assert.Equal(t, []string{"n4", "n3", "n2", "n1"}, visitOrder)
 }
 
+func TestRunFiltersUntilPassingNodeStopsAfterFirstMatchWithoutInterestedExtender(t *testing.T) {
+	pod := BuildTestPod("pod", 100, 1000)
+	node1 := BuildTestNode("n1", 1000, 2000000)
+	node2 := BuildTestNode("n2", 1000, 2000000)
+
+	ascendingNodeOrdering := clustersnapshot.NewPriorityNodeOrderMapping(func(a, b *framework.NodeInfo) bool {
+		return a.Node().Name < b.Node().Name
+	})
+
+	pluginRunner, snapshot, err := newTestPluginRunnerAndSnapshot(nil)
+	assert.NoError(t, err)
+	extender, err := kubescheduler.NewHTTPExtender(&config.Extender{
+		URLPrefix:        "http://127.0.0.1",
+		FilterVerb:       "filter",
+		ManagedResources: []config.ExtenderManagedResource{{Name: "nvidia.com/gpu"}},
+	})
+	assert.NoError(t, err)
+	pluginRunner.extenders = append(pluginRunner.extenders, extender)
+	pluginRunner.parallelism = 1
+	assert.NoError(t, snapshot.AddNodeInfo(framework.NewTestNodeInfo(node1)))
+	assert.NoError(t, snapshot.AddNodeInfo(framework.NewTestNodeInfo(node2)))
+
+	var visitedNodes []string
+	selectedNode, _, schedulingErr := pluginRunner.RunFiltersUntilPassingNode(pod, clustersnapshot.SchedulingOptions{
+		NodeOrdering: ascendingNodeOrdering,
+		IsNodeAcceptable: func(info *framework.NodeInfo) bool {
+			visitedNodes = append(visitedNodes, info.Node().Name)
+			return true
+		},
+	})
+
+	assert.NoError(t, schedulingErr)
+	assert.Equal(t, node1.Name, selectedNode.Name)
+	assert.Equal(t, []string{node1.Name}, visitedNodes)
+}
+
 // earlyExitNodeOrderMapping is a NodeOrderMapping that iterates in the ascending order of node names
 // but stops iterating after a certain number of nodes by returning nil.
 type earlyExitNodeOrderMapping struct {

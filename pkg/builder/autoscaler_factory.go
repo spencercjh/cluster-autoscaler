@@ -95,8 +95,8 @@ func initializeDefaultOptions(ctx context.Context, opts *coreoptions.AutoscalerO
 	if opts.AutoscalingKubeClients == nil {
 		opts.AutoscalingKubeClients = ca_context.NewAutoscalingKubeClients(ctx, opts.AutoscalingOptions, opts.KubeClient, opts.InformerFactory)
 	}
+	registerExtenderManagedResources(opts.SchedulerConfig)
 	if opts.FrameworkHandle == nil {
-		registerExtenderManagedResources(opts.SchedulerConfig)
 		fwHandle, err := framework.NewHandle(ctx, opts.InformerFactory, opts.SchedulerConfig, opts.DynamicResourceAllocationEnabled, opts.CSINodeAwareSchedulingEnabled)
 		if err != nil {
 			return err
