@@ -18,18 +18,24 @@ package predicate
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	apiv1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	"k8s.io/client-go/informers"
 	clientsetfake "k8s.io/client-go/kubernetes/fake"
+	extenderv1 "k8s.io/kube-scheduler/extender/v1"
 	"k8s.io/kubernetes/pkg/features"
 	"k8s.io/kubernetes/pkg/scheduler/apis/config"
 	scheduler_config_latest "k8s.io/kubernetes/pkg/scheduler/apis/config/latest"
@@ -521,7 +527,7 @@ func newTestPluginRunnerAndSnapshot(schedConfig *config.KubeSchedulerConfigurati
 		return nil, nil, err
 	}
 	snapshot := NewPredicateSnapshot(store.NewBasicSnapshotStore(), fwHandle, true, 1, false, 0)
-	return NewSchedulerPluginRunner(fwHandle, snapshot, 1, 0), snapshot, nil
+	return NewSchedulerPluginRunner(fwHandle, snapshot, 1, 0, nil), snapshot, nil
 }
 
 func BenchmarkRunFiltersUntilPassingNode(b *testing.B) {
