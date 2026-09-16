@@ -426,7 +426,7 @@ func TestRunFiltersOnNodeInvokesExtenderForIgnoredManagedResource(t *testing.T) 
 	fwHandle, err := framework.NewHandle(context.Background(), informers.NewSharedInformerFactory(clientsetfake.NewSimpleClientset(), 0), schedConfig, true, false)
 	assert.NoError(t, err)
 	snapshot := NewPredicateSnapshot(store.NewBasicSnapshotStore(), fwHandle, true, 1, false, 0)
-	pluginRunner := NewSchedulerPluginRunner(fwHandle, snapshot, 1, 0, fwHandle.Extenders)
+	pluginRunner := NewSchedulerPluginRunner(fwHandle, snapshot, 1, 0)
 
 	node := BuildTestNode("hami-template", 1000, 2000000)
 	assert.NotContains(t, node.Status.Capacity, gpuCoresResource)
@@ -714,7 +714,7 @@ func newTestPluginRunnerAndSnapshot(schedConfig *config.KubeSchedulerConfigurati
 		return nil, nil, err
 	}
 	snapshot := NewPredicateSnapshot(store.NewBasicSnapshotStore(), fwHandle, true, 1, false, 0)
-	return NewSchedulerPluginRunner(fwHandle, snapshot, 1, 0, nil), snapshot, nil
+	return NewSchedulerPluginRunner(fwHandle, snapshot, 1, 0), snapshot, nil
 }
 
 func BenchmarkRunFiltersUntilPassingNode(b *testing.B) {

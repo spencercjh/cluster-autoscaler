@@ -43,15 +43,15 @@ type SchedulerPluginRunner struct {
 	extenders           []schedulerinterface.Extender
 }
 
-// NewSchedulerPluginRunner builds a SchedulerPluginRunner.
-func NewSchedulerPluginRunner(fwHandle *framework.Handle, snapshot clustersnapshot.ClusterSnapshot, parallelism int, verbosityOffset int, extenders []schedulerinterface.Extender) *SchedulerPluginRunner {
+// NewSchedulerPluginRunner builds a SchedulerPluginRunner using the extenders configured on fwHandle.
+func NewSchedulerPluginRunner(fwHandle *framework.Handle, snapshot clustersnapshot.ClusterSnapshot, parallelism int, verbosityOffset int) *SchedulerPluginRunner {
 	return &SchedulerPluginRunner{
 		fwHandle:            fwHandle,
 		snapshot:            snapshot,
 		defaultNodeOrdering: clustersnapshot.NewLastIndexOrderMapping(1),
 		parallelism:         parallelism,
 		verbosityOffset:     verbosityOffset,
-		extenders:           extenders,
+		extenders:           fwHandle.Extenders,
 	}
 }
 
