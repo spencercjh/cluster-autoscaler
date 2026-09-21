@@ -103,6 +103,9 @@ func initializeDefaultOptions(ctx context.Context, opts *coreoptions.AutoscalerO
 		}
 		opts.FrameworkHandle = fwHandle
 	}
+	if err := opts.FrameworkHandle.ConfigureHAMiFeasibility(opts.SchedulerConfig, opts.HAMiFeasibilityExtenders); err != nil {
+		return err
+	}
 	if opts.ClusterSnapshot == nil {
 		opts.ClusterSnapshot = predicate.NewPredicateSnapshot(store.NewBasicSnapshotStore(), opts.FrameworkHandle, opts.DynamicResourceAllocationEnabled, opts.PredicateParallelism, opts.CSINodeAwareSchedulingEnabled, opts.SchedulerVerbosityOffset)
 	}

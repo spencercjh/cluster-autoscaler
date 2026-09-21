@@ -193,6 +193,8 @@ type AutoscalingOptions struct {
 	// SchedulerConfig allows changing configuration of in-tree
 	// scheduler plugins acting on PreFilter and Filter extension points
 	SchedulerConfig *scheduler_config.KubeSchedulerConfiguration
+	// HAMiFeasibilityExtenders selects Filter URLs using the alpha complete occupancy contract.
+	HAMiFeasibilityExtenders []string
 	// NodeDeletionDelayTimeout is maximum time CA waits for removing delay-deletion.cluster-autoscaler.kubernetes.io/ annotations before deleting the node.
 	NodeDeletionDelayTimeout time.Duration
 	// WriteStatusConfigMap tells if the status information should be written to a ConfigMap
