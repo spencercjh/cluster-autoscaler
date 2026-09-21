@@ -103,7 +103,7 @@ func initializeDefaultOptions(ctx context.Context, opts *coreoptions.AutoscalerO
 		}
 		opts.FrameworkHandle = fwHandle
 	}
-	if err := opts.FrameworkHandle.ConfigureHAMiFeasibility(opts.SchedulerConfig, opts.HAMiFeasibilityExtenders); err != nil {
+	if err := opts.FrameworkHandle.ConfigureExtenderOccupancy(opts.SchedulerConfig, opts.ExtenderOccupancyURLs); err != nil {
 		return err
 	}
 	if opts.ClusterSnapshot == nil {

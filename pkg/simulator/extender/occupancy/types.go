@@ -14,20 +14,19 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package hami
+package occupancy
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
 
 	v1 "k8s.io/api/core/v1"
 	extenderv1 "k8s.io/kube-scheduler/extender/v1"
 )
 
-const Version = "hami.io/feasibility-v1alpha1"
+// Version identifies a local experiment, not an accepted Kubernetes API.
+const Version = "experimental-full-occupancy-v1alpha1"
 
-// Preserve requires validation and retention of the supplied device assignment.
+// Preserve requires the evaluator to validate and retain the Pod's assignment.
 // Allocate requests a fresh assignment, ignoring scheduler-generated allocation
 // results in Pod metadata but retaining user device-selection constraints.
 const (
@@ -35,15 +34,13 @@ const (
 	Allocate = "allocate"
 )
 
-// Allocation is a device constraint, not the reason a workload is being checked.
-// Encoding and Data belong to the device evaluator; generic callers must not
-// interpret them. Preserve records must be bound to this Pod and target Node by
-// the evaluator. Allocate forbids a record, so stale assignments cannot override
-// the requested operation. Missing/unknown modes are errors, never defaults.
+// Allocation constrains evaluation without exposing the caller's lifecycle.
+// Preserve requires the evaluator to extract its allocation metadata from Pod
+// and validate its binding, inventory, demand and user constraints. Missing or
+// invalid evidence must fail, never fall back to allocate. Allocate ignores only
+// evaluator-generated assignment results in Pod, retaining user constraints.
 type Allocation struct {
-	Mode     string          `json:"mode"`
-	Encoding string          `json:"encoding,omitempty"`
-	Data     json.RawMessage `json:"data,omitempty"`
+	Mode string `json:"mode"`
 }
 
 type Resident struct {
@@ -115,14 +112,7 @@ func Validate(r Request) error {
 			pods[string(resident.Pod.UID)] = true
 			a := resident.Allocation
 			switch a.Mode {
-			case Preserve:
-				if a.Encoding == "" || !json.Valid(a.Data) || bytes.Equal(bytes.TrimSpace(a.Data), []byte("null")) {
-					return fmt.Errorf("preserve requires a typed allocation record")
-				}
-			case Allocate:
-				if a.Encoding != "" || len(a.Data) != 0 {
-					return fmt.Errorf("allocate cannot contain an old allocation record")
-				}
+			case Preserve, Allocate:
 			default:
 				return fmt.Errorf("unknown allocation constraint %q", a.Mode)
 			}

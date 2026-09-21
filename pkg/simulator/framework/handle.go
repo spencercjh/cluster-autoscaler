@@ -33,7 +33,7 @@ import (
 	schedulerframeworkruntime "k8s.io/kubernetes/pkg/scheduler/framework/runtime"
 	schedulermetrics "k8s.io/kubernetes/pkg/scheduler/metrics"
 	"sigs.k8s.io/cluster-autoscaler/pkg/simulator/dynamicresources"
-	"sigs.k8s.io/cluster-autoscaler/pkg/simulator/extender/hami"
+	"sigs.k8s.io/cluster-autoscaler/pkg/simulator/extender/occupancy"
 )
 
 var (
@@ -156,18 +156,18 @@ func configureIgnoredExtenderResources(schedConfig *schedulerconfig.KubeSchedule
 	return nil
 }
 
-// ConfigureHAMiFeasibility opts selected extender URLs into complete occupancy filtering.
-func (h *Handle) ConfigureHAMiFeasibility(cfg *schedulerconfig.KubeSchedulerConfiguration, urls []string) error {
+// ConfigureExtenderOccupancy opts selected extender URLs into complete occupancy filtering.
+func (h *Handle) ConfigureExtenderOccupancy(cfg *schedulerconfig.KubeSchedulerConfiguration, urls []string) error {
 	for _, url := range urls {
 		found := false
 		if cfg != nil {
 			for i, c := range cfg.Extenders {
 				if c.URLPrefix == url {
-					if _, ok := h.Extenders[i].(*hami.Extender); ok {
+					if _, ok := h.Extenders[i].(*occupancy.Extender); ok {
 						found = true
 						continue
 					}
-					adapter, err := hami.New(h.Extenders[i], &c)
+					adapter, err := occupancy.New(h.Extenders[i], &c)
 					if err != nil {
 						return err
 					}
@@ -177,7 +177,7 @@ func (h *Handle) ConfigureHAMiFeasibility(cfg *schedulerconfig.KubeSchedulerConf
 			}
 		}
 		if !found {
-			return fmt.Errorf("HAMi feasibility URL %q is not a configured extender", url)
+			return fmt.Errorf("occupancy URL %q is not a configured extender", url)
 		}
 	}
 	return nil

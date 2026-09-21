@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package hami
+package occupancy
 
 import (
 	"bytes"
@@ -22,23 +22,21 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/rest"
-	config "k8s.io/kubernetes/pkg/scheduler/apis/config"
 	"net/http"
 	"sort"
 	"strings"
 	"time"
 
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/client-go/rest"
 	extenderv1 "k8s.io/kube-scheduler/extender/v1"
 	fwk "k8s.io/kube-scheduler/framework"
+	config "k8s.io/kubernetes/pkg/scheduler/apis/config"
 )
-
-// Extender adds the opt-in HAMi alpha node-local feasibility contract.
 
 const bodyLimit = 1 << 20
 
+// Extender sends complete node-local occupancy to an explicitly enabled evaluator.
 type Extender struct {
 	fwk.Extender
 	endpoint  string
@@ -141,18 +139,18 @@ func (e *Extender) exchange(body []byte, nodes []fwk.NodeInfo) ([]fwk.NodeInfo, 
 	return filtered, result.FailedNodes, result.FailedAndUnresolvableNodes, nil
 }
 
-// New explicitly enables the HAMi alpha extension on one configured Filter.
+// New explicitly enables the experimental full-occupancy extension on one Filter.
 // Other extender methods keep their existing transport and behavior.
 func New(base fwk.Extender, cfg *config.Extender) (*Extender, error) {
 	if base.IsIgnorable() || cfg.FilterVerb == "" {
-		return nil, fmt.Errorf("HAMi feasibility requires a non-ignorable Filter")
+		return nil, fmt.Errorf("full occupancy requires a non-ignorable Filter")
 	}
 	resources := make([]string, 0, len(cfg.ManagedResources))
 	for _, r := range cfg.ManagedResources {
 		resources = append(resources, r.Name)
 	}
 	if len(resources) == 0 {
-		return nil, fmt.Errorf("HAMi feasibility requires explicit managedResources")
+		return nil, fmt.Errorf("full occupancy requires explicit managedResources")
 	}
 	var tls rest.TLSClientConfig
 	if c := cfg.TLSConfig; c != nil {
@@ -184,14 +182,6 @@ func (e *Extender) residentAllocation(node string, info fwk.PodInfo) (Allocation
 	if original == "" || original != node || p.Spec.NodeName != node {
 		return Allocation{}, fmt.Errorf("unknown or inconsistent real Pod placement")
 	}
-	record := p.Annotations["hami.io/vgpu-devices-allocated"]
-	if record == "" {
-		return Allocation{}, fmt.Errorf("missing preserved NVIDIA allocation")
-	}
-	data, err := json.Marshal(struct {
-		Node    string    `json:"node"`
-		PodUID  types.UID `json:"podUID"`
-		Devices string    `json:"devices"`
-	}{node, p.UID, record})
-	return Allocation{Mode: Preserve, Encoding: "hami.io/nvidia-allocation-v1", Data: data}, err
+	// Only the evaluator understands allocation metadata inside the full Pod.
+	return Allocation{Mode: Preserve}, nil
 }
